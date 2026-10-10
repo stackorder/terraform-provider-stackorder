@@ -14,6 +14,12 @@ The provider is under development and not yet published to a registry. It will o
 
 ## Development
 
+Until Stackorder tags the release that carries the `api/v1` stack outputs types, `go.mod` requires `github.com/stackorder/stackorder` v0.3.0 as a placeholder, and the provider builds only in a Go workspace that also uses a Stackorder checkout with those types. Create the workspace in the repository root, naming the path of that checkout; git ignores `go.work` and `go.work.sum`:
+
+```shell
+go work init . ../stackorder
+```
+
 | Target | What it does |
 |---|---|
 | `make build` | Builds `terraform-provider-stackorder` in the repository root |
