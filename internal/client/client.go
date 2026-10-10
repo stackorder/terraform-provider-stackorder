@@ -100,21 +100,18 @@ func WithRetryPolicy(p RetryPolicy) Option {
 
 // New returns a Client for the server at serverURL, an http or https URL
 // that may carry a path prefix but no user info, query or fragment. src
-// supplies the token of every request attempt.
+// supplies the token of every request attempt. The error for a rejected
+// URL never repeats the URL, which may carry a secret.
 func New(serverURL string, src TokenSource, opts ...Option) (*Client, error) {
 	u, err := url.Parse(serverURL)
 	if err != nil {
-		var urlErr *url.Error
-		if errors.As(err, &urlErr) {
-			err = urlErr.Err
-		}
-		return nil, fmt.Errorf("parsing the Stackorder server URL: %w", err)
+		return nil, errors.New("the Stackorder server URL does not parse as a URL")
 	}
 	if (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
-		return nil, fmt.Errorf("the Stackorder server URL %q is not an http or https URL", u.Redacted())
+		return nil, errors.New("the Stackorder server URL is not an http or https URL with a host")
 	}
 	if u.User != nil || strings.ContainsAny(serverURL, "?#") {
-		return nil, fmt.Errorf("the Stackorder server URL %q carries user info, a query or a fragment", u.Redacted())
+		return nil, errors.New("the Stackorder server URL carries user info, a query or a fragment")
 	}
 	if src == nil {
 		return nil, errors.New("no token source for the Stackorder server")

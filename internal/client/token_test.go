@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -206,6 +207,51 @@ func TestAPIKeyOutsideActions(t *testing.T) {
 			tok, err := src.Token(t.Context())
 			require.NoError(t, err)
 			assert.Equal(t, tt.want, tok)
+		})
+	}
+}
+
+func TestActionsIDTokensAvailable(t *testing.T) {
+	tests := []struct {
+		name            string
+		envRequestURL   string
+		envRequestToken string
+		want            bool
+	}{
+		{
+			name:            "endpoint and request token",
+			envRequestURL:   "https://actions.example/idtoken?api-version=2.0",
+			envRequestToken: actionsRequestToken,
+			want:            true,
+		},
+		{
+			name:          "endpoint only",
+			envRequestURL: "https://actions.example/idtoken?api-version=2.0",
+		},
+		{
+			name:            "request token only",
+			envRequestToken: actionsRequestToken,
+		},
+		{
+			name:            "blank variables",
+			envRequestURL:   " ",
+			envRequestToken: "\n",
+		},
+		{
+			name: "neither",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			outsideActions(t)
+			t.Setenv(client.EnvOIDCRequestURL, tt.envRequestURL)
+			t.Setenv(client.EnvOIDCRequestToken, tt.envRequestToken)
+
+			assert.Equal(t, tt.want, client.ActionsIDTokensAvailable())
+
+			src, err := client.NewTokenSource(client.Credentials{ServerURL: "https://stackorder.acme.example", APIKey: "sk_configured"})
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, strings.HasPrefix(fmt.Sprint(src), "GitHub Actions ID tokens"))
 		})
 	}
 }

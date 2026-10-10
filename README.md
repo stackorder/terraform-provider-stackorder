@@ -12,6 +12,32 @@ The provider is under development and not yet published to a registry. It will o
 - The data source works with any Terraform or OpenTofu release that supports plugin protocol 6 (Terraform 1.0 and later, every OpenTofu release).
 - Go 1.26 or later to build the provider.
 
+## Configuration
+
+```hcl
+provider "stackorder" {
+  server_url = "https://stackorder.acme.example"
+}
+```
+
+Inside a Stackorder plan, apply or drift job the block can stay empty: the Stackorder CLI sets `STACKORDER_SERVER_URL`, `STACKORDER_REPOSITORY`, `STACKORDER_RUN_ID` and `STACKORDER_STACK` for Terraform, and the job's own GitHub Actions identity authenticates the reads. Stackorder CLI releases up to 0.3.0 set `STACKORDER_STACK` but not the other three, so a job needs a later release to read outputs with its own identity.
+
+Every attribute is optional and falls back to an environment variable. An attribute set to an empty string counts as unset.
+
+| Attribute | Environment fallback | Meaning |
+|---|---|---|
+| `server_url` | `STACKORDER_SERVER_URL` | Base URL of the Stackorder server. One of the two is required. |
+| `api_key` | `STACKORDER_API_KEY` | Automation API key (`sk_…`), used only where no GitHub Actions ID token can be requested. Sensitive. |
+| `repository` | `STACKORDER_REPOSITORY`, then `GITHUB_REPOSITORY` | Repository of the stacks being planned, as `owner/repo`: the repository a stack named without an `owner/repo//` prefix belongs to. |
+| `oidc_audience` | `STACKORDER_OIDC_AUDIENCE` | Audience of the GitHub Actions ID tokens, which must be one the server accepts. Defaults to the server URL (`server_url` or `STACKORDER_SERVER_URL`) as configured, trailing slash included. |
+
+### Credentials
+
+Where Terraform runs decides which credentials the provider uses:
+
+- **Job token, inside Stackorder jobs.** Whenever the job can request GitHub Actions ID tokens (`permissions: id-token: write`, which the Stackorder reusable workflows grant), the provider requests a fresh ID token for every request to the server. The server accepts these only from a Stackorder plan, apply or drift job and checks the reading stack against the producer's readers, so the provider also needs `STACKORDER_RUN_ID` and `STACKORDER_STACK`, which the Stackorder CLI sets. Without them the provider refuses to configure. A configured API key is ignored in this case, so an admin key never silently replaces the job's own identity. A GitHub Actions job outside Stackorder that grants `id-token: write`, for example to assume a cloud role, therefore cannot use the provider.
+- **API key, elsewhere.** Where no ID token can be requested, such as on a workstation, the provider sends the API key from `api_key` or `STACKORDER_API_KEY`. API keys are admin keys of the Stackorder server and are not bound to the readers a producer lists: keep them out of CI, and prefer `STACKORDER_API_KEY` over writing the key into configuration.
+
 ## Development
 
 Until Stackorder tags the release that carries the `api/v1` stack outputs types, `go.mod` requires `github.com/stackorder/stackorder` v0.3.0 as a placeholder, and the provider builds only in a Go workspace that also uses a Stackorder checkout with those types. Create the workspace in the repository root, naming the path of that checkout; git ignores `go.work` and `go.work.sum`:
