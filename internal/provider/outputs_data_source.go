@@ -25,6 +25,13 @@ import (
 )
 
 const (
+	stackDescription = "Key of the producer stack. `path` or `path:instance` names a stack of the provider's `repository`, such as `stacks/prod/vpc` or `stacks/prod/apps:blue`; " +
+		"`owner/repo//key` names a stack of another repository of the same Stackorder installation, such as `acme/platform//stacks/prod/dns`."
+	valuesDescription = "Object with one attribute per output the stack serves, named after the output, sensitive outputs included when the producer shares them. " +
+		"Terraform treats the whole object as sensitive. Outputs the producer withholds are absent."
+)
+
+const (
 	codeNotFound   = "not_found"
 	codeConflict   = "conflict"
 	codeSuperseded = "superseded"
@@ -68,25 +75,22 @@ func (d *outputsDataSource) Metadata(_ context.Context, req datasource.MetadataR
 func (d *outputsDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		MarkdownDescription: "Reads the root-module outputs a stack shares through the Stackorder server, so a stack can use another stack's outputs without access to its state.\n\n" +
-			"Nothing is shared until the producer opts in on its default branch: its `.stackorder.yaml`, or `stackorder.yaml` for every stack of its repository, lists the stacks that may read its outputs under `outputs.readers`. " +
-			"Sensitive outputs are withheld unless the producer also sets `outputs.sensitive: share`, and the data source warns about the outputs withheld.\n\n" +
+			sharingDescription("data source") + "\n\n" +
 			"Values read by a data source are stored in the plan file, which Stackorder uploads as a workflow artifact, and in state. " +
-			"Read sensitive values with the `stackorder_outputs` ephemeral resource instead, which keeps them out of both.",
+			"To read sensitive values without storing them, use `ephemeral \"stackorder_outputs\"` instead, which keeps them out of both and needs Terraform 1.10 or later, or OpenTofu 1.11 or later.",
 		Attributes: map[string]schema.Attribute{
 			"stack": schema.StringAttribute{
-				Required: true,
-				MarkdownDescription: "Key of the producer stack. `path` or `path:instance` names a stack of the provider's `repository`, such as `stacks/prod/vpc` or `stacks/prod/apps:blue`; " +
-					"`owner/repo//key` names a stack of another repository of the same Stackorder installation, such as `acme/platform//stacks/prod/dns`.",
+				Required:            true,
+				MarkdownDescription: stackDescription,
 			},
 			"id": schema.StringAttribute{
 				Computed:            true,
 				MarkdownDescription: "Qualified key of the stack, `owner/repo//key`.",
 			},
 			"values": schema.DynamicAttribute{
-				Computed:  true,
-				Sensitive: true,
-				MarkdownDescription: "Object with one attribute per output the stack serves, named after the output, sensitive outputs included when the producer shares them. " +
-					"Terraform treats the whole object as sensitive. Outputs the producer withholds are absent.",
+				Computed:            true,
+				Sensitive:           true,
+				MarkdownDescription: valuesDescription,
 			},
 			"nonsensitive_values": schema.DynamicAttribute{
 				Computed: true,
@@ -99,13 +103,9 @@ func (d *outputsDataSource) Schema(_ context.Context, _ datasource.SchemaRequest
 
 // Configure keeps the settings of the configured provider for Read.
 func (d *outputsDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
-	if req.ProviderData == nil {
-		return
-	}
-	data, ok := req.ProviderData.(*providerData)
-	if !ok {
-		resp.Diagnostics.AddError("Unexpected provider data",
-			fmt.Sprintf("The stackorder_outputs data source received provider data of type %T. Report this to the provider's maintainers.", req.ProviderData))
+	data, problem := providerDataOf(req.ProviderData, "data source")
+	if problem != nil {
+		resp.Diagnostics.Append(problem)
 		return
 	}
 	d.data = data
@@ -127,6 +127,23 @@ func (d *outputsDataSource) Read(ctx context.Context, req datasource.ReadRequest
 	model.Values = read.values
 	model.NonsensitiveValues = read.nonsensitiveValues
 	resp.Diagnostics.Append(resp.State.Set(ctx, &model)...)
+}
+
+func sharingDescription(kind string) string {
+	return "Nothing is shared until the producer opts in on its default branch: its `.stackorder.yaml`, or `stackorder.yaml` for every stack of its repository, lists the stacks that may read its outputs under `outputs.readers`. " +
+		"Sensitive outputs are withheld unless the producer also sets `outputs.sensitive: share`, and the " + kind + " warns about the outputs withheld."
+}
+
+func providerDataOf(raw any, kind string) (*providerData, diag.Diagnostic) {
+	if raw == nil {
+		return nil, nil
+	}
+	data, ok := raw.(*providerData)
+	if !ok {
+		return nil, diag.NewErrorDiagnostic("Unexpected provider data", fmt.Sprintf(
+			"The stackorder_outputs %s received provider data of type %T. Report this to the provider's maintainers.", kind, raw))
+	}
+	return data, nil
 }
 
 func readStackOutputs(ctx context.Context, data *providerData, stack string) (stackOutputs, diag.Diagnostics) {
@@ -377,7 +394,7 @@ func withheldWarning(producer string, withheld []string) diag.Diagnostic {
 		names[i] = strconv.Quote(name)
 	}
 	return diag.NewWarningDiagnostic("Sensitive outputs withheld", fmt.Sprintf(
-		"The stack %s withholds its sensitive outputs %s, so they are absent from values. The producer shares them by setting outputs.sensitive: share beside outputs.readers on its default branch. Shared sensitive outputs are stored in the reader's plan file and state; read them with the stackorder_outputs ephemeral resource to keep them out of both.",
+		"The stack %s withholds its sensitive outputs %s, so they are absent from values. The producer shares them by setting outputs.sensitive: share beside outputs.readers on its default branch. A data \"stackorder_outputs\" block stores shared sensitive outputs in the reader's plan file and state; read them with ephemeral \"stackorder_outputs\" instead to keep them out of both.",
 		producer, strings.Join(names, ", ")))
 }
 

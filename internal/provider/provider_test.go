@@ -213,7 +213,7 @@ func TestProviderServesProtocol6(t *testing.T) {
 			assert.Equal(t, map[string]bool{"server_url": false, "api_key": true, "repository": false, "oidc_audience": false}, attributes)
 			assert.Empty(t, resp.Provider.Block.BlockTypes)
 			assert.Equal(t, []string{"stackorder_outputs"}, slices.Sorted(maps.Keys(resp.DataSourceSchemas)))
-			assert.Empty(t, resp.EphemeralResourceSchemas)
+			assert.Equal(t, []string{"stackorder_outputs"}, slices.Sorted(maps.Keys(resp.EphemeralResourceSchemas)))
 			assert.Empty(t, resp.ResourceSchemas)
 		})
 	}

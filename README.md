@@ -4,7 +4,7 @@ Terraform and OpenTofu provider for [Stackorder](https://github.com/stackorder/s
 
 ## Status
 
-The provider is under development and not yet published to a registry. It offers `stackorder_outputs` as a data source, and will offer it as an ephemeral resource too: name a stack and receive the root-module outputs its producer shares through the Stackorder server, so the consumer needs no access to the producer's state.
+The provider is under development and not yet published to a registry. It offers `stackorder_outputs` as a data source and as an ephemeral resource: name a stack and receive the root-module outputs its producer shares through the Stackorder server, so the consumer needs no access to the producer's state.
 
 ## Requirements
 
@@ -73,7 +73,25 @@ output "zone_id" {
 
 `stack` takes `path` or `path:instance` for a stack of the provider's `repository`, or `owner/repo//key` for a stack of another repository. `values` holds every output the producer serves and is sensitive as a whole; `nonsensitive_values` holds the outputs not marked sensitive, and `id` the qualified key `owner/repo//key`. The data source warns about the sensitive outputs the producer withholds.
 
-The server serves outputs once its operator enables them with `STACKORDER_STATE_BUCKETS` and an apply or drift job of the producer has reported where its state lives. Values read by a data source are stored in the plan file, which Stackorder uploads as a workflow artifact, and in state: read sensitive values with the `stackorder_outputs` ephemeral resource, which keeps them out of both, once it is available.
+The server serves outputs once its operator enables them with `STACKORDER_STATE_BUCKETS` and an apply or drift job of the producer has reported where its state lives. Values read by a data source are stored in the plan file, which Stackorder uploads as a workflow artifact, and in state. To read sensitive values without storing them, use `ephemeral "stackorder_outputs"`, which Terraform never writes to the plan file or state:
+
+```hcl
+ephemeral "stackorder_outputs" "database" {
+  stack = "stacks/prod/database"
+}
+
+resource "aws_secretsmanager_secret" "database" {
+  name = "acme/prod/eks/database"
+}
+
+resource "aws_secretsmanager_secret_version" "database" {
+  secret_id                = aws_secretsmanager_secret.database.id
+  secret_string_wo         = ephemeral.stackorder_outputs.database.values.master_password
+  secret_string_wo_version = 1
+}
+```
+
+The ephemeral resource takes the same `stack` and returns the same `values` and `nonsensitive_values`, without `id`, and warns about withheld outputs in the same way. Its result, `nonsensitive_values` included, can only be referenced where Terraform accepts ephemeral values: write-only arguments such as `secret_string_wo` (Terraform 1.11 or later), provider and provisioner blocks, locals, ephemeral input variables, ephemeral outputs of child modules and other ephemeral resources. Terraform reads the outputs again in every plan and apply that needs them.
 
 ## Development
 

@@ -177,7 +177,7 @@ func nullObject(block *tfprotov6.SchemaBlock, set map[string]tftypes.Value) tfty
 	return tftypes.NewValue(block.ValueType(), attrs)
 }
 
-func readThroughServer(t *testing.T, stack string) (map[string]tftypes.Value, []*tfprotov6.Diagnostic) {
+func configuredServer(t *testing.T) (tfprotov6.ProviderServer, *tfprotov6.GetProviderSchemaResponse) {
 	t.Helper()
 	server, err := providerserver.NewProtocol6WithError(New("test")())()
 	require.NoError(t, err)
@@ -189,29 +189,44 @@ func readThroughServer(t *testing.T, stack string) (map[string]tftypes.Value, []
 	configured, err := server.ConfigureProvider(t.Context(), &tfprotov6.ConfigureProviderRequest{TerraformVersion: "1.14.4", Config: &providerConfig})
 	require.NoError(t, err)
 	require.Empty(t, configured.Diagnostics)
+	return server, schemas
+}
 
+func assertNoSecretsServed(t *testing.T, diags []*tfprotov6.Diagnostic) {
+	t.Helper()
+	for _, d := range diags {
+		for _, secret := range []string{testAPIKey, testRequestToken, pskCanary} {
+			assert.NotContains(t, d.Summary+" "+d.Detail, secret)
+		}
+	}
+}
+
+func objectAttributes(t *testing.T, raw *tfprotov6.DynamicValue, typ tftypes.Type) map[string]tftypes.Value {
+	t.Helper()
+	if raw == nil {
+		return nil
+	}
+	v, err := raw.Unmarshal(typ)
+	require.NoError(t, err)
+	if v.IsNull() {
+		return nil
+	}
+	var attrs map[string]tftypes.Value
+	require.NoError(t, v.As(&attrs))
+	return attrs
+}
+
+func readThroughServer(t *testing.T, stack string) (map[string]tftypes.Value, []*tfprotov6.Diagnostic) {
+	t.Helper()
+	server, schemas := configuredServer(t)
 	ds := schemas.DataSourceSchemas[outputsTypeName]
 	require.NotNil(t, ds)
 	config, err := tfprotov6.NewDynamicValue(ds.ValueType(), nullObject(ds.Block, map[string]tftypes.Value{"stack": str(stack)}))
 	require.NoError(t, err)
 	read, err := server.ReadDataSource(t.Context(), &tfprotov6.ReadDataSourceRequest{TypeName: outputsTypeName, Config: &config})
 	require.NoError(t, err)
-	for _, d := range read.Diagnostics {
-		for _, secret := range []string{testAPIKey, testRequestToken, pskCanary} {
-			assert.NotContains(t, d.Summary+" "+d.Detail, secret)
-		}
-	}
-	if read.State == nil {
-		return nil, read.Diagnostics
-	}
-	state, err := read.State.Unmarshal(ds.ValueType())
-	require.NoError(t, err)
-	if state.IsNull() {
-		return nil, read.Diagnostics
-	}
-	var attrs map[string]tftypes.Value
-	require.NoError(t, state.As(&attrs))
-	return attrs, read.Diagnostics
+	assertNoSecretsServed(t, read.Diagnostics)
+	return objectAttributes(t, read.State, ds.ValueType()), read.Diagnostics
 }
 
 func serverEnvironment(t *testing.T, srv *outputsServer, env map[string]string) {
@@ -248,24 +263,27 @@ func TestOutputsDataSourceSchema(t *testing.T) {
 		"values":              tftypes.DynamicPseudoType,
 		"nonsensitive_values": tftypes.DynamicPseudoType,
 	}, types)
-	for _, want := range []string{"outputs.readers", "outputs.sensitive: share", "default branch", "plan file", "ephemeral resource"} {
+	for _, want := range []string{"outputs.readers", "outputs.sensitive: share", "the data source warns", "default branch", "plan file", `ephemeral "stackorder_outputs"`, "Terraform 1.10", "OpenTofu 1.11"} {
 		assert.Contains(t, ds.Block.Description, want)
 	}
 }
 
-func TestOutputsDataSourceRead(t *testing.T) {
-	tests := []struct {
-		name             string
-		env              map[string]string
-		stack            string
-		path             string
-		body             []byte
-		wantQuery        url.Values
-		wantID           string
-		wantValues       tftypes.Value
-		wantNonsensitive tftypes.Value
-		wantWithheld     []string
-	}{
+type outputsReadCase struct {
+	name             string
+	env              map[string]string
+	stack            string
+	path             string
+	body             []byte
+	wantQuery        url.Values
+	wantID           string
+	wantValues       tftypes.Value
+	wantNonsensitive tftypes.Value
+	wantWithheld     []string
+}
+
+func outputsReadCases(t *testing.T) []outputsReadCase {
+	t.Helper()
+	return []outputsReadCase{
 		{
 			name:             "stack of GITHUB_REPOSITORY",
 			env:              map[string]string{"GITHUB_REPOSITORY": "acme/infra"},
@@ -340,52 +358,65 @@ func TestOutputsDataSourceRead(t *testing.T) {
 			wantWithheld:     []string{`"db_password", "vpn_preshared_key"`},
 		},
 	}
-	for _, tt := range tests {
+}
+
+func (tt outputsReadCase) assertRead(t *testing.T, srv *outputsServer, attrs map[string]tftypes.Value, diags []*tfprotov6.Diagnostic) {
+	t.Helper()
+	got := srv.requests()
+	require.Len(t, got, 1)
+	assert.Equal(t, tt.path, got[0].path)
+	assert.Equal(t, tt.wantQuery, got[0].query)
+	assert.Equal(t, "Bearer "+testAPIKey, got[0].auth)
+	require.NotNil(t, attrs, "%v", diags)
+	assert.True(t, attrs["stack"].Equal(str(tt.stack)), "stack %s", attrs["stack"])
+	assert.True(t, attrs["values"].Type().Equal(tt.wantValues.Type()), "values type %s", attrs["values"].Type())
+	assert.True(t, attrs["values"].Equal(tt.wantValues), "values %s", attrs["values"])
+	assert.True(t, attrs["nonsensitive_values"].Type().Equal(tt.wantNonsensitive.Type()), "nonsensitive_values type %s", attrs["nonsensitive_values"].Type())
+	assert.True(t, attrs["nonsensitive_values"].Equal(tt.wantNonsensitive), "nonsensitive_values %s", attrs["nonsensitive_values"])
+	if tt.wantWithheld == nil {
+		assert.Empty(t, diags)
+		return
+	}
+	require.Len(t, diags, 1)
+	assert.Equal(t, tfprotov6.DiagnosticSeverityWarning, diags[0].Severity)
+	assert.Equal(t, withheldSummary, diags[0].Summary)
+	for _, want := range append(tt.wantWithheld, tt.wantID, "outputs.sensitive: share", "default branch", `data "stackorder_outputs"`, `ephemeral "stackorder_outputs"`) {
+		assert.Contains(t, diags[0].Detail, want)
+	}
+}
+
+func TestOutputsDataSourceRead(t *testing.T) {
+	for _, tt := range outputsReadCases(t) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := newOutputsServer(t, map[string]served{tt.path: okWith(tt.body)})
 			serverEnvironment(t, srv, tt.env)
 
 			attrs, diags := readThroughServer(t, tt.stack)
 
-			got := srv.requests()
-			require.Len(t, got, 1)
-			assert.Equal(t, tt.path, got[0].path)
-			assert.Equal(t, tt.wantQuery, got[0].query)
-			assert.Equal(t, "Bearer "+testAPIKey, got[0].auth)
-			require.NotNil(t, attrs, "%v", diags)
-			assert.True(t, attrs["stack"].Equal(str(tt.stack)), "stack %s", attrs["stack"])
+			tt.assertRead(t, srv, attrs, diags)
 			assert.True(t, attrs["id"].Equal(str(tt.wantID)), "id %s", attrs["id"])
-			assert.True(t, attrs["values"].Equal(tt.wantValues), "values %s", attrs["values"])
-			assert.True(t, attrs["nonsensitive_values"].Equal(tt.wantNonsensitive), "nonsensitive_values %s", attrs["nonsensitive_values"])
-			if tt.wantWithheld == nil {
-				assert.Empty(t, diags)
-				return
-			}
-			require.Len(t, diags, 1)
-			assert.Equal(t, tfprotov6.DiagnosticSeverityWarning, diags[0].Severity)
-			assert.Equal(t, withheldSummary, diags[0].Summary)
-			for _, want := range append(tt.wantWithheld, tt.wantID, "outputs.sensitive: share", "default branch", "ephemeral resource") {
-				assert.Contains(t, diags[0].Detail, want)
-			}
 		})
 	}
 }
 
-func TestOutputsDataSourceReadErrors(t *testing.T) {
+type outputsReadErrorCase struct {
+	name          string
+	env           map[string]string
+	stack         string
+	answers       map[string]served
+	wantRequests  int
+	wantSummary   string
+	wantAttribute bool
+	wantDetail    []string
+	notDetail     []string
+}
+
+func outputsReadErrorCases(t *testing.T) []outputsReadErrorCase {
+	t.Helper()
 	malformed := encode(t, v1.StackOutputs{Repo: "acme/infra", Stack: vpcStack, Outputs: map[string]v1.StackOutput{
 		"vpn_preshared_key": {Value: json.RawMessage(strconv.Quote(pskCanary)), Type: json.RawMessage(`"number"`), Sensitive: true},
 	}})
-	tests := []struct {
-		name          string
-		env           map[string]string
-		stack         string
-		answers       map[string]served
-		wantRequests  int
-		wantSummary   string
-		wantAttribute bool
-		wantDetail    []string
-		notDetail     []string
-	}{
+	return []outputsReadErrorCase{
 		{
 			name:          "no repository for a stack of the same repository",
 			stack:         vpcStack,
@@ -485,32 +516,41 @@ func TestOutputsDataSourceReadErrors(t *testing.T) {
 			wantDetail:   []string{`output "vpn_preshared_key"`, "does not conform to its type", "127.0.0.1"},
 		},
 	}
-	for _, tt := range tests {
+}
+
+func (tt outputsReadErrorCase) assertFailure(t *testing.T, srv *outputsServer, attrs map[string]tftypes.Value, diags []*tfprotov6.Diagnostic) {
+	t.Helper()
+	assert.Len(t, srv.requests(), tt.wantRequests)
+	for _, name := range []string{"values", "nonsensitive_values"} {
+		assert.True(t, attrs[name].IsNull(), "%s %s", name, attrs[name])
+	}
+	require.Len(t, diags, 1)
+	d := diags[0]
+	assert.Equal(t, tfprotov6.DiagnosticSeverityError, d.Severity)
+	assert.Equal(t, tt.wantSummary, d.Summary)
+	if tt.wantAttribute {
+		assert.True(t, d.Attribute.Equal(tftypes.NewAttributePath().WithAttributeName("stack")), "attribute %s", d.Attribute)
+	} else {
+		assert.Nil(t, d.Attribute)
+	}
+	for _, want := range tt.wantDetail {
+		assert.Contains(t, d.Detail, want)
+	}
+	for _, unwanted := range append(tt.notDetail, testAPIKey) {
+		assert.NotContains(t, d.Summary+" "+d.Detail, unwanted)
+	}
+}
+
+func TestOutputsDataSourceReadErrors(t *testing.T) {
+	for _, tt := range outputsReadErrorCases(t) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := newOutputsServer(t, tt.answers)
 			serverEnvironment(t, srv, tt.env)
 
 			attrs, diags := readThroughServer(t, tt.stack)
 
-			assert.Len(t, srv.requests(), tt.wantRequests)
-			for _, name := range []string{"id", "values", "nonsensitive_values"} {
-				assert.True(t, attrs[name].IsNull(), "%s %s", name, attrs[name])
-			}
-			require.Len(t, diags, 1)
-			d := diags[0]
-			assert.Equal(t, tfprotov6.DiagnosticSeverityError, d.Severity)
-			assert.Equal(t, tt.wantSummary, d.Summary)
-			if tt.wantAttribute {
-				assert.True(t, d.Attribute.Equal(tftypes.NewAttributePath().WithAttributeName("stack")), "attribute %s", d.Attribute)
-			} else {
-				assert.Nil(t, d.Attribute)
-			}
-			for _, want := range tt.wantDetail {
-				assert.Contains(t, d.Detail, want)
-			}
-			for _, unwanted := range append(tt.notDetail, testAPIKey) {
-				assert.NotContains(t, d.Summary+" "+d.Detail, unwanted)
-			}
+			tt.assertFailure(t, srv, attrs, diags)
+			assert.True(t, attrs["id"].IsNull(), "id %s", attrs["id"])
 		})
 	}
 }
