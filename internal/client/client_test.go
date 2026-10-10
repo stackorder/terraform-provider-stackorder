@@ -686,15 +686,18 @@ func TestNewRefusesInvalidSettings(t *testing.T) {
 		noSource  bool
 		wantErr   string
 	}{
-		{name: "empty URL", serverURL: "", wantErr: "is not an http or https URL"},
-		{name: "no scheme", serverURL: "stackorder.acme.example", wantErr: "is not an http or https URL"},
-		{name: "other scheme", serverURL: "ftp://stackorder.acme.example", wantErr: "is not an http or https URL"},
-		{name: "no host", serverURL: "https://", wantErr: "is not an http or https URL"},
-		{name: "unparsable URL", serverURL: "https://stackorder.acme.example/%zz", wantErr: "parsing the Stackorder server URL"},
-		{name: "unparsable URL with user info", serverURL: "https://ci:s3cr3t@stackorder.acme.example/%zz", wantErr: `parsing the Stackorder server URL: invalid URL escape "%zz"`},
-		{name: "other scheme with user info", serverURL: "ftp://ci:s3cr3t@stackorder.acme.example", wantErr: "is not an http or https URL"},
-		{name: "user info", serverURL: "https://ci:s3cr3t@stackorder.acme.example", wantErr: `"https://ci:xxxxx@stackorder.acme.example" carries user info, a query or a fragment`},
+		{name: "empty URL", serverURL: "", wantErr: "the Stackorder server URL is not an http or https URL with a host"},
+		{name: "no scheme", serverURL: "stackorder.acme.example", wantErr: "is not an http or https URL with a host"},
+		{name: "other scheme", serverURL: "ftp://stackorder.acme.example", wantErr: "is not an http or https URL with a host"},
+		{name: "no host", serverURL: "https://", wantErr: "is not an http or https URL with a host"},
+		{name: "unparsable URL", serverURL: "https://stackorder.acme.example/%zz", wantErr: "the Stackorder server URL does not parse as a URL"},
+		{name: "unparsable URL with user info", serverURL: "https://ci:s3cr3t@stackorder.acme.example/%zz", wantErr: "does not parse as a URL"},
+		{name: "password read as a port", serverURL: "https://ci:s3cr3t", wantErr: "does not parse as a URL"},
+		{name: "other scheme with user info", serverURL: "ftp://ci:s3cr3t@stackorder.acme.example", wantErr: "is not an http or https URL with a host"},
+		{name: "user info without a scheme", serverURL: "ci:s3cr3t@stackorder.acme.example", wantErr: "is not an http or https URL with a host"},
+		{name: "user info", serverURL: "https://ci:s3cr3t@stackorder.acme.example", wantErr: "the Stackorder server URL carries user info, a query or a fragment"},
 		{name: "query", serverURL: "https://stackorder.acme.example/?tenant=acme", wantErr: "carries user info, a query or a fragment"},
+		{name: "secret in the query", serverURL: "https://stackorder.acme.example/?key=s3cr3t", wantErr: "carries user info, a query or a fragment"},
 		{name: "empty query", serverURL: "https://stackorder.acme.example/?", wantErr: "carries user info, a query or a fragment"},
 		{name: "fragment", serverURL: "https://stackorder.acme.example/#acme", wantErr: "carries user info, a query or a fragment"},
 		{name: "empty fragment", serverURL: "https://stackorder.acme.example/#", wantErr: "carries user info, a query or a fragment"},
@@ -709,6 +712,7 @@ func TestNewRefusesInvalidSettings(t *testing.T) {
 			c, err := client.New(tt.serverURL, src)
 			require.ErrorContains(t, err, tt.wantErr)
 			assert.NotContains(t, err.Error(), "s3cr3t")
+			assert.NotContains(t, err.Error(), "acme")
 			assert.Nil(t, c)
 		})
 	}

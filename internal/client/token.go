@@ -72,9 +72,7 @@ type Credentials struct {
 // of the token endpoint are retried like those of the server. No format
 // verb prints a source's secret.
 func NewTokenSource(creds Credentials) (TokenSource, error) {
-	requestURL := strings.TrimSpace(os.Getenv(EnvOIDCRequestURL))
-	requestToken := strings.TrimSpace(os.Getenv(EnvOIDCRequestToken))
-	if requestURL != "" && requestToken != "" {
+	if requestURL, requestToken, ok := actionsTokenRequest(); ok {
 		audience := firstNonEmpty(creds.OIDCAudience, os.Getenv(EnvOIDCAudience), creds.ServerURL)
 		if audience == "" {
 			return nil, ErrNoAudience
@@ -90,6 +88,20 @@ func NewTokenSource(creds Credentials) (TokenSource, error) {
 		return apiKeySource(key), nil
 	}
 	return nil, ErrNoCredentials
+}
+
+// ActionsIDTokensAvailable reports whether ACTIONS_ID_TOKEN_REQUEST_URL and
+// ACTIONS_ID_TOKEN_REQUEST_TOKEN are both set, which is when NewTokenSource
+// returns a source of GitHub Actions ID tokens.
+func ActionsIDTokensAvailable() bool {
+	_, _, ok := actionsTokenRequest()
+	return ok
+}
+
+func actionsTokenRequest() (requestURL, requestToken string, ok bool) {
+	requestURL = strings.TrimSpace(os.Getenv(EnvOIDCRequestURL))
+	requestToken = strings.TrimSpace(os.Getenv(EnvOIDCRequestToken))
+	return requestURL, requestToken, requestURL != "" && requestToken != ""
 }
 
 type oidcSource struct {
