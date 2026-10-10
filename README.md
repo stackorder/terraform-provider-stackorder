@@ -4,7 +4,7 @@ Terraform and OpenTofu provider for [Stackorder](https://github.com/stackorder/s
 
 ## Status
 
-The provider is under development and not yet published to a registry. It will offer `stackorder_outputs` as a data source and as an ephemeral resource: name a stack and receive the root-module outputs its producer shares through the Stackorder server, so the consumer needs no access to the producer's state.
+The provider is under development and not yet published to a registry. It offers `stackorder_outputs` as a data source, and will offer it as an ephemeral resource too: name a stack and receive the root-module outputs its producer shares through the Stackorder server, so the consumer needs no access to the producer's state.
 
 ## Requirements
 
@@ -37,6 +37,43 @@ Where Terraform runs decides which credentials the provider uses:
 
 - **Job token, inside Stackorder jobs.** Whenever the job can request GitHub Actions ID tokens (`permissions: id-token: write`, which the Stackorder reusable workflows grant), the provider requests a fresh ID token for every request to the server. The server accepts these only from a Stackorder plan, apply or drift job and checks the reading stack against the producer's readers, so the provider also needs `STACKORDER_RUN_ID` and `STACKORDER_STACK`, which the Stackorder CLI sets. Without them the provider refuses to configure. A configured API key is ignored in this case, so an admin key never silently replaces the job's own identity. A GitHub Actions job outside Stackorder that grants `id-token: write`, for example to assume a cloud role, therefore cannot use the provider.
 - **API key, elsewhere.** Where no ID token can be requested, such as on a workstation, the provider sends the API key from `api_key` or `STACKORDER_API_KEY`. API keys are admin keys of the Stackorder server and are not bound to the readers a producer lists: keep them out of CI, and prefer `STACKORDER_API_KEY` over writing the key into configuration.
+
+## Usage
+
+A stack shares its outputs only with the stacks its producer lists under `outputs.readers` on its default branch, in the stack's `.stackorder.yaml` or in `stackorder.yaml` for every stack of its repository. A reader is a stack key or pattern of the same repository, or `owner/repo//pattern` for stacks of another repository of the same Stackorder installation. Sensitive outputs stay withheld unless the producer also sets `outputs.sensitive: share`:
+
+```yaml
+outputs:
+  readers:
+    - stacks/prod/eks
+    - acme/platform//clusters/**
+  sensitive: share
+```
+
+A reading stack then names the producer with the `stackorder_outputs` data source:
+
+```hcl
+data "stackorder_outputs" "vpc" {
+  stack = "stacks/prod/vpc"
+}
+
+resource "aws_security_group" "cluster" {
+  name   = "eks-cluster"
+  vpc_id = data.stackorder_outputs.vpc.nonsensitive_values.vpc_id
+}
+
+data "stackorder_outputs" "dns" {
+  stack = "acme/platform//stacks/prod/dns"
+}
+
+output "zone_id" {
+  value = data.stackorder_outputs.dns.nonsensitive_values.zone_id
+}
+```
+
+`stack` takes `path` or `path:instance` for a stack of the provider's `repository`, or `owner/repo//key` for a stack of another repository. `values` holds every output the producer serves and is sensitive as a whole; `nonsensitive_values` holds the outputs not marked sensitive, and `id` the qualified key `owner/repo//key`. The data source warns about the sensitive outputs the producer withholds.
+
+The server serves outputs once its operator enables them with `STACKORDER_STATE_BUCKETS` and an apply or drift job of the producer has reported where its state lives. Values read by a data source are stored in the plan file, which Stackorder uploads as a workflow artifact, and in state: read sensitive values with the `stackorder_outputs` ephemeral resource, which keeps them out of both, once it is available.
 
 ## Development
 
