@@ -1,0 +1,8 @@
+{
+  "repo": "acme/infra",
+  "stack": "stacks/prod/dns",
+  "serial": 3,
+  "lineage": "5b2e9a74-1c3d-4f60-8a7e-2d9c0b1f6e48",
+  "terraform_version": "1.9.8",
+  "outputs": {}
+}

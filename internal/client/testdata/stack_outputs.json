@@ -1,0 +1,58 @@
+{
+  "repo": "acme/infra",
+  "stack": "stacks/prod/vpc",
+  "serial": 42,
+  "lineage": "8d3f6c1e-2b7a-4e9d-9c51-0f4a6b2d7e13",
+  "terraform_version": "1.9.8",
+  "outputs": {
+    "endpoints": {
+      "value": {
+        "dynamodb": "vpce-0d4e5f6a7b8c9d0e1",
+        "s3": "vpce-0a1b2c3d4e5f6a7b8"
+      },
+      "type": [
+        "object",
+        {
+          "dynamodb": "string",
+          "s3": "string"
+        }
+      ],
+      "sensitive": false
+    },
+    "nat_gateway_count": {
+      "value": 3,
+      "type": "number",
+      "sensitive": false
+    },
+    "private_subnet_ids": {
+      "value": [
+        "subnet-0a1b2c3d4e5f6a7b8",
+        "subnet-0b2c3d4e5f6a7b8c9"
+      ],
+      "type": [
+        "list",
+        "string"
+      ],
+      "sensitive": false
+    },
+    "tags": {
+      "value": {
+        "environment": "prod",
+        "team": "platform"
+      },
+      "type": [
+        "map",
+        "string"
+      ],
+      "sensitive": false
+    },
+    "vpc_id": {
+      "value": "vpc-0a1b2c3d4e5f67890",
+      "type": "string",
+      "sensitive": false
+    }
+  },
+  "withheld": [
+    "vpn_preshared_key"
+  ]
+}
