@@ -183,7 +183,7 @@ func (p *stackorderProvider) DataSources(_ context.Context) []func() datasource.
 }
 
 func (p *stackorderProvider) EphemeralResources(_ context.Context) []func() ephemeral.EphemeralResource {
-	return []func() ephemeral.EphemeralResource{}
+	return []func() ephemeral.EphemeralResource{NewOutputsEphemeralResource}
 }
 
 func (p *stackorderProvider) Resources(_ context.Context) []func() resource.Resource {
