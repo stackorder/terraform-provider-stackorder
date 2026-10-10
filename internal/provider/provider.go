@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 
@@ -46,6 +47,12 @@ type providerModel struct {
 type providerData struct {
 	// Client reads stack outputs from the configured server.
 	Client *client.Client
+	// ServerHost is the host of the server URL, the only part of it that
+	// diagnostics name.
+	ServerHost string
+	// IDTokens reports whether the provider authenticates with GitHub
+	// Actions ID tokens rather than an API key.
+	IDTokens bool
 	// Repository is the "owner/repo" of the stacks being planned, empty when
 	// no setting names it.
 	Repository string
@@ -145,8 +152,10 @@ func (p *stackorderProvider) Configure(ctx context.Context, req provider.Configu
 		Repository: firstNonEmpty(cfg.Repository.ValueString(), os.Getenv(envRepository), os.Getenv(envGitHubRepository)),
 		RunID:      strings.TrimSpace(os.Getenv(envRunID)),
 		Reader:     strings.TrimSpace(os.Getenv(envStack)),
+		ServerHost: hostOf(serverURL),
+		IDTokens:   client.ActionsIDTokensAvailable(),
 	}
-	if client.ActionsIDTokensAvailable() {
+	if data.IDTokens {
 		if missing := missingJobVariables(data); missing != "" {
 			resp.Diagnostics.AddError("Not inside a Stackorder job", fmt.Sprintf(
 				"%s. This job can request GitHub Actions ID tokens, so the provider authenticates with them, and reads with an ID token work only inside a Stackorder plan, apply or drift job, where the Stackorder CLI sets %s and %s for Terraform. Outside one, configure api_key or %s in an environment without ID tokens, since they take precedence over an API key.",
@@ -170,7 +179,7 @@ func (p *stackorderProvider) Configure(ctx context.Context, req provider.Configu
 }
 
 func (p *stackorderProvider) DataSources(_ context.Context) []func() datasource.DataSource {
-	return []func() datasource.DataSource{}
+	return []func() datasource.DataSource{NewOutputsDataSource}
 }
 
 func (p *stackorderProvider) EphemeralResources(_ context.Context) []func() ephemeral.EphemeralResource {
@@ -191,6 +200,14 @@ func missingJobVariables(data *providerData) string {
 		return envStack + " is not set"
 	}
 	return ""
+}
+
+func hostOf(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
 }
 
 func firstNonEmpty(values ...string) string {
