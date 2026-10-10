@@ -1,0 +1,9 @@
+/terraform-provider-stackorder
+/dist/
+**/.terraform/
+*.tfstate
+*.tfstate.*
+go.work
+go.work.sum
+.DS_Store
+*.tfrc
