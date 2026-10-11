@@ -1,0 +1,122 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make lint
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: make test
+
+  acceptance:
+    name: acceptance (${{ matrix.cli }} ${{ matrix.version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cli: terraform
+            version: 1.10.x
+          - cli: terraform
+            version: latest
+          - cli: tofu
+            version: 1.11.x
+          - cli: tofu
+            version: latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - if: matrix.cli == 'terraform'
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ matrix.version }}
+          terraform_wrapper: false
+      - name: Point the acceptance tests at the installed Terraform
+        if: matrix.cli == 'terraform'
+        run: echo "TF_ACC_TERRAFORM_PATH=$(command -v terraform)" >> "$GITHUB_ENV"
+      - name: Install OpenTofu and point the acceptance tests at it and its registry host
+        if: matrix.cli == 'tofu'
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ matrix.version }}
+          tofu_wrapper: false
+          provider_acceptance_tests: true
+      - name: Show the CLI the acceptance tests run
+        run: '"$TF_ACC_TERRAFORM_PATH" version'
+      - run: make testacc
+
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.14.x
+          terraform_wrapper: false
+      - run: go generate ./...
+      - name: Fail when the generated docs or the formatted examples differ from the committed files
+        run: |
+          git diff --exit-code -- docs/ examples/
+          untracked="$(git ls-files --others --exclude-standard -- docs/)"
+          if [ -n "$untracked" ]; then
+            echo "::error::go generate created docs that are not committed"
+            echo "$untracked"
+            exit 1
+          fi
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Build, which needs go.mod to require a Stackorder release whose api/v1 has StackOutputs
+        run: go build ./...
+      - name: Cross-compile for macOS on arm64 and Windows on amd64
+        run: |
+          GOOS=darwin GOARCH=arm64 go build -o /dev/null .
+          GOOS=windows GOARCH=amd64 go build -o /dev/null .
