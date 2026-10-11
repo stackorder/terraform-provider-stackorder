@@ -107,11 +107,7 @@ The ephemeral resource takes the same `stack` and returns the same `values` and 
 
 ## Development
 
-Until Stackorder tags the release that carries the `api/v1` stack outputs types, `go.mod` requires `github.com/stackorder/stackorder` v0.3.0 as a placeholder, and the provider builds only in a Go workspace that also uses a Stackorder checkout with those types. Create the workspace in the repository root, naming the path of that checkout; git ignores `go.work` and `go.work.sum`:
-
-```shell
-go work init . ../stackorder
-```
+The provider builds from the published Stackorder module that `go.mod` requires, with no Stackorder checkout or Go workspace. `make test` runs the unit tests and `make testacc` the acceptance tests:
 
 | Target | What it does |
 |---|---|

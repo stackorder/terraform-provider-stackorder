@@ -114,7 +114,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - name: Build, which needs go.mod to require a Stackorder release whose api/v1 has StackOutputs
+      - name: Build
         run: go build ./...
       - name: Cross-compile for macOS on arm64 and Windows on amd64
         run: |
