@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/hashicorp/go-version"
 	tfjson "github.com/hashicorp/terraform-json"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/diag"
@@ -178,15 +180,104 @@ func testAccProtoV6ProviderFactoriesWithEcho() map[string]func() (tfprotov6.Prov
 	return factories
 }
 
+func cliIsOpenTofu() bool {
+	return strings.Contains(filepath.Base(os.Getenv("TF_ACC_TERRAFORM_PATH")), "tofu") || os.Getenv("TF_ACC_PROVIDER_HOST") == "registry.opentofu.org"
+}
+
+func TestCLIIsOpenTofu(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		host string
+		want bool
+	}{
+		{name: "tofu binary", path: "/opt/bin/tofu", want: true},
+		{name: "tofu binary with an extension", path: "/opt/bin/tofu.exe", want: true},
+		{name: "terraform binary", path: "/usr/bin/terraform"},
+		{name: "terraform binary in a directory named after tofu", path: "/opt/tofu-1.11/terraform"},
+		{name: "terraform binary with the OpenTofu registry host", path: "/usr/bin/terraform", host: "registry.opentofu.org", want: true},
+		{name: "terraform binary with the Terraform registry host", path: "/usr/bin/terraform", host: "registry.terraform.io"},
+		{name: "neither set"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("TF_ACC_TERRAFORM_PATH", tt.path)
+			t.Setenv("TF_ACC_PROVIDER_HOST", tt.host)
+
+			assert.Equal(t, tt.want, cliIsOpenTofu())
+		})
+	}
+}
+
 func ephemeralResourcesSupported() tfversion.TerraformVersionCheck {
 	// tofu version -json reports OpenTofu's own version, and OpenTofu has ephemeral resources only from 1.11.
-	if strings.Contains(filepath.Base(os.Getenv("TF_ACC_TERRAFORM_PATH")), "tofu") || os.Getenv("TF_ACC_PROVIDER_HOST") == "registry.opentofu.org" {
+	if cliIsOpenTofu() {
 		return tfversion.SkipBelow(tfversion.Version1_11_0)
 	}
 	return tfversion.SkipBelow(tfversion.Version1_10_0)
 }
 
-const echoAddress = "echo.x"
+func tofuPlansEphemeralOpens(versionJSON []byte) (bool, error) {
+	var reported struct {
+		Version string `json:"terraform_version"`
+	}
+	if err := json.Unmarshal(versionJSON, &reported); err != nil {
+		return false, fmt.Errorf("decode the CLI version: %w", err)
+	}
+	v, err := version.NewVersion(reported.Version)
+	if err != nil {
+		return false, fmt.Errorf("parse the CLI version: %w", err)
+	}
+	// OpenTofu 1.11 plans opening an ephemeral resource as a change, so its plan after apply is never empty.
+	return v.LessThan(tfversion.Version1_12_0), nil
+}
+
+func TestTofuPlansEphemeralOpens(t *testing.T) {
+	tests := []struct {
+		name        string
+		versionJSON string
+		want        bool
+		wantErr     string
+	}{
+		{name: "1.11.0", versionJSON: `{"terraform_version":"1.11.0","platform":"linux_amd64","provider_selections":{}}`, want: true},
+		{name: "1.11.14", versionJSON: `{"terraform_version":"1.11.14","platform":"darwin_arm64","provider_selections":{}}`, want: true},
+		{name: "1.12.0", versionJSON: `{"terraform_version":"1.12.0","platform":"linux_amd64","provider_selections":{}}`},
+		{name: "1.12.6", versionJSON: `{"terraform_version":"1.12.6","platform":"darwin_arm64","provider_selections":{}}`},
+		{name: "1.13.1", versionJSON: `{"terraform_version":"1.13.1","platform":"darwin_arm64","provider_selections":{}}`},
+		{name: "output that is not json", versionJSON: `OpenTofu v1.11.14`, wantErr: "decode the CLI version"},
+		{name: "no version", versionJSON: `{"platform":"darwin_arm64"}`, wantErr: "parse the CLI version"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := tofuPlansEphemeralOpens([]byte(tt.versionJSON))
+
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func cliPlansEphemeralOpens(t *testing.T) bool {
+	t.Helper()
+	path := os.Getenv("TF_ACC_TERRAFORM_PATH")
+	if os.Getenv("TF_ACC") == "" || path == "" || !cliIsOpenTofu() {
+		return false
+	}
+	out, err := exec.CommandContext(t.Context(), path, "version", "-json").Output()
+	require.NoError(t, err)
+	opens, err := tofuPlansEphemeralOpens(out)
+	require.NoError(t, err)
+	return opens
+}
+
+const (
+	echoAddress   = "echo.x"
+	ephemeralMode = tfjson.ResourceMode("ephemeral")
+)
 
 func holdsOnlyEcho(m *tfjson.StateModule) error {
 	if m == nil {
@@ -243,6 +334,9 @@ func (c planHoldingOnlyEcho) CheckPlan(_ context.Context, req plancheck.CheckPla
 	}
 	changed := make([]string, 0, len(req.Plan.ResourceChanges))
 	for _, rc := range req.Plan.ResourceChanges {
+		if rc.Mode == ephemeralMode {
+			continue
+		}
 		changed = append(changed, rc.Address)
 	}
 	if !slices.Equal(changed, []string{echoAddress}) {
@@ -253,7 +347,16 @@ func (c planHoldingOnlyEcho) CheckPlan(_ context.Context, req plancheck.CheckPla
 		resp.Error = fmt.Errorf("the plan has no planned values")
 		return
 	}
-	resp.Error = holdsOnlyEcho(req.Plan.PlannedValues.RootModule)
+	resp.Error = holdsOnlyEcho(withoutEphemeral(req.Plan.PlannedValues.RootModule))
+}
+
+func withoutEphemeral(m *tfjson.StateModule) *tfjson.StateModule {
+	if m == nil {
+		return nil
+	}
+	kept := *m
+	kept.Resources = slices.DeleteFunc(slices.Clone(m.Resources), func(r *tfjson.StateResource) bool { return r.Mode == ephemeralMode })
+	return &kept
 }
 
 func TestAccOutputsEphemeral(t *testing.T) {
@@ -275,8 +378,11 @@ provider "echo" {
 
 resource "echo" "x" {}
 `,
+			ExpectNonEmptyPlan: cliPlansEphemeralOpens(t),
 			ConfigPlanChecks: resource.ConfigPlanChecks{
-				PreApply: []plancheck.PlanCheck{planHoldingOnlyEcho{secret: pskCanary}},
+				PreApply:             []plancheck.PlanCheck{planHoldingOnlyEcho{secret: pskCanary}},
+				PostApplyPreRefresh:  []plancheck.PlanCheck{plancheck.ExpectResourceAction(echoAddress, plancheck.ResourceActionNoop)},
+				PostApplyPostRefresh: []plancheck.PlanCheck{plancheck.ExpectResourceAction(echoAddress, plancheck.ResourceActionNoop)},
 			},
 			ConfigStateChecks: []statecheck.StateCheck{
 				statecheck.ExpectKnownValue(echoAddress, tfjsonpath.New("data"), knownvalue.ObjectExact(map[string]knownvalue.Check{
