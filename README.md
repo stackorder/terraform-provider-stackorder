@@ -32,7 +32,7 @@ provider "stackorder" {
 }
 ```
 
-Inside a Stackorder plan, apply or drift job the block can stay empty: the Stackorder CLI sets `STACKORDER_SERVER_URL`, `STACKORDER_REPOSITORY`, `STACKORDER_RUN_ID` and `STACKORDER_STACK` for Terraform, and the job's own GitHub Actions identity authenticates the reads. Stackorder CLI releases up to 0.3.0 set `STACKORDER_STACK` but not the other three, so a job needs a later release to read outputs with its own identity.
+Inside a Stackorder plan, apply or drift job the block can stay empty: the Stackorder CLI sets `STACKORDER_SERVER_URL`, `STACKORDER_REPOSITORY`, `STACKORDER_RUN_ID` and `STACKORDER_STACK` for Terraform, and the job's own GitHub Actions identity authenticates the reads. Stackorder CLI releases before 0.4.0 set `STACKORDER_STACK` but not the other three, so a job needs 0.4.0 or later to read outputs with its own identity.
 
 Every attribute is optional and falls back to an environment variable. An attribute set to an empty string counts as unset.
 
