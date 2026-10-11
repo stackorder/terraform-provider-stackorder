@@ -20,7 +20,7 @@ The [Stackorder documentation](https://docs.stackorder.io) covers the server, th
 - A Stackorder server whose operator has enabled shared outputs by setting `STACKORDER_STATE_BUCKETS` to the state buckets, or bucket and prefix pairs, the server may read, and has granted the server read access to them.
 - A producer stack that has run at least one apply or drift job with a Stackorder CLI that reports where the stack's state lives, so that the server knows which state object to read.
 - Terraform 1.10 or later, or OpenTofu 1.11 or later, for the `stackorder_outputs` ephemeral resource. The data source works with every release that supports plugin protocol 6: Terraform 1.0 and later, and every OpenTofu release.
-- Inside Stackorder jobs, a Stackorder CLI release later than 0.3.0, which passes the server URL, the run and the repository to Terraform.
+- Inside Stackorder jobs, Stackorder CLI 0.4.0 or later, which passes the server URL, the run and the repository to Terraform.
 
 ## Sharing outputs
 

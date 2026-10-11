@@ -4,7 +4,7 @@ All notable changes to this provider are documented here. The format follows [Ke
 
 ## [Unreleased]
 
-It needs Stackorder 0.4.0 or later on the server and in the CLI, the release planned to be the first to serve shared outputs.
+It needs Stackorder 0.4.0 or later on the server and in the CLI, the first release to serve shared outputs.
 
 ### Added
 
