@@ -4,6 +4,8 @@ All notable changes to this provider are documented here. The format follows [Ke
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-11
+
 It needs Stackorder 0.4.0 or later on the server and in the CLI, the first release to serve shared outputs.
 
 ### Added
@@ -13,4 +15,5 @@ It needs Stackorder 0.4.0 or later on the server and in the CLI, the first relea
 - The `stackorder_outputs` ephemeral resource, with the same `stack`, `values` and `nonsensitive_values`, which Terraform never writes to the plan file or state. It needs Terraform 1.10 or OpenTofu 1.11 or later.
 - Credentials: inside a Stackorder plan, apply or drift job, a fresh GitHub Actions ID token for every request, bound to the reading stack through `STACKORDER_RUN_ID` and `STACKORDER_STACK`; elsewhere, an API key from `api_key` or `STACKORDER_API_KEY`. Where an ID token can be requested, a configured API key is ignored, so an admin key never replaces the job's own identity.
 
-[Unreleased]: https://github.com/stackorder/terraform-provider-stackorder/commits/main
+[Unreleased]: https://github.com/stackorder/terraform-provider-stackorder/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/stackorder/terraform-provider-stackorder/releases/tag/v0.1.0
