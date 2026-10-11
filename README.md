@@ -6,6 +6,18 @@ Terraform and OpenTofu provider for [Stackorder](https://github.com/stackorder/s
 
 The provider is under development and not yet published to a registry. It offers `stackorder_outputs` as a data source and as an ephemeral resource: name a stack and receive the root-module outputs its producer shares through the Stackorder server, so the consumer needs no access to the producer's state.
 
+## Documentation
+
+The registry documentation lives in [`docs/`](docs), in the [layout the Terraform Registry reads](https://developer.hashicorp.com/terraform/registry/providers/docs) from each release tag:
+
+| Page | Source |
+|---|---|
+| [`docs/index.md`](docs/index.md): the provider, sharing outputs, credentials, requirements and the provider configuration | [`templates/index.md.tmpl`](templates/index.md.tmpl), [`examples/provider/`](examples/provider) |
+| [`docs/data-sources/outputs.md`](docs/data-sources/outputs.md): the `stackorder_outputs` data source | [`templates/data-sources/outputs.md.tmpl`](templates/data-sources/outputs.md.tmpl), [`examples/data-sources/stackorder_outputs/`](examples/data-sources/stackorder_outputs) |
+| [`docs/ephemeral-resources/outputs.md`](docs/ephemeral-resources/outputs.md): the `stackorder_outputs` ephemeral resource | [`templates/ephemeral-resources/outputs.md.tmpl`](templates/ephemeral-resources/outputs.md.tmpl), [`examples/ephemeral-resources/stackorder_outputs/`](examples/ephemeral-resources/stackorder_outputs) |
+
+[tfplugindocs](https://github.com/hashicorp/terraform-plugin-docs) generates every page from its template, its example files and the descriptions in the provider's schema, so `docs/` is never edited by hand: change the source and run `make generate`, then commit `docs/` with the change. Page and template names leave out the `stackorder_` prefix, as the registry expects; example directories keep it.
+
 ## Requirements
 
 - Terraform 1.10 or later, or OpenTofu 1.11 or later, for the `stackorder_outputs` ephemeral resource.
@@ -108,7 +120,8 @@ go work init . ../stackorder
 | `make testacc` | Runs the acceptance tests (`TF_ACC=1`) with the binary at `TF_ACC_TERRAFORM_PATH`, else `terraform` on `PATH`, else a downloaded Terraform |
 | `make lint` | Checks formatting, runs `go vet` and golangci-lint |
 | `make fmt` | Formats the Go sources |
-| `make generate` | Runs `go generate` |
+| `make generate` | Formats `examples/` with the `terraform` on `PATH`, then regenerates `docs/` from `templates/`, `examples/` and the provider schema with tfplugindocs, which builds the provider and reads its schema with Terraform 1.14.4, downloaded from releases.hashicorp.com on every run whatever `terraform` is on `PATH` |
+| `make docs-check` | Runs `make generate` and fails when `docs/` or `examples/` then differs from the last commit, staged changes included, or `docs/` has a page git does not track |
 | `make tidy` | Tidies `go.mod` and `go.sum` |
 
 The acceptance tests never pick up `tofu` from `PATH`. To run them with OpenTofu, name the binary and OpenTofu's registry host:

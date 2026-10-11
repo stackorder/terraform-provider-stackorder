@@ -11,6 +11,9 @@ import (
 	"github.com/stackorder/terraform-provider-stackorder/internal/provider"
 )
 
+//go:generate terraform fmt -recursive ./examples/
+//go:generate go tool tfplugindocs generate --provider-name stackorder --rendered-provider-name Stackorder --tf-version 1.14.4
+
 var version = "dev"
 
 func main() {
