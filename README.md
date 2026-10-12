@@ -4,7 +4,20 @@ Terraform and OpenTofu provider for [Stackorder](https://github.com/stackorder/s
 
 ## Status
 
-The provider is under development and not yet published to a registry. It offers `stackorder_outputs` as a data source and as an ephemeral resource: name a stack and receive the root-module outputs its producer shares through the Stackorder server, so the consumer needs no access to the producer's state.
+The provider is published as `stackorder/stackorder` on the [Terraform Registry](https://registry.terraform.io/providers/stackorder/stackorder/latest) and the [OpenTofu Registry](https://search.opentofu.org/provider/stackorder/stackorder/latest). It offers `stackorder_outputs` as a data source and as an ephemeral resource: name a stack and receive the root-module outputs its producer shares through the Stackorder server, so the consumer needs no access to the producer's state.
+
+```hcl
+terraform {
+  required_providers {
+    stackorder = {
+      source  = "stackorder/stackorder"
+      version = "~> 0.1.0"
+    }
+  }
+}
+```
+
+Releases follow [Semantic Versioning](https://semver.org/), and while the version is below 1.0 a minor release may still change the schema. `~> 0.1.0` accepts patch releases of 0.1 only.
 
 ## Documentation
 
@@ -143,6 +156,6 @@ The path must be absolute: use your `~/go/bin`, or this repository's directory a
 export TF_CLI_CONFIG_FILE="$PWD/dev.tfrc"
 ```
 
-With the override in place, `plan` and `apply` use the local binary and skip version and checksum checks for it. Running `init` is not needed for this provider and can fail while it is unpublished. OpenTofu reads the same `dev_overrides` block.
+With the override in place, `plan` and `apply` use the local binary and skip version and checksum checks for it. Running `init` is not needed for this provider; if you run it, it installs the published release and records it in the lock file, and `plan` and `apply` still use the local binary. OpenTofu reads the same `dev_overrides` block.
 
 `go run . -debug` starts the provider in debug mode and prints a `TF_REATTACH_PROVIDERS` value; export it in the shell that runs `terraform plan` to use that process, for example under a debugger.
